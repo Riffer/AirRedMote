@@ -37,6 +37,9 @@ IRMP_DATA irsnd_data;
  ***/
 bool sJustReceived;
 
+bool holdingA1 = false;
+bool stop = false;
+
 /***
  *  OneButton on pin A1 - connect ground to A1 via momentaneous switch
  ***/
@@ -49,7 +52,8 @@ OneButton buttonA1(A1, true);
 void handleReceivedIRData()
 {
   irmp_get_data(&irmp_data);
-  sJustReceived = true; // Signal new data for main loop, this is the recommended way for handling a callback :-)
+  if (!holdingA1)
+    sJustReceived = true; // Signal new data for main loop, this is the recommended way for handling a callback :-)
   interrupts();         // enable interrupts
 }
 
@@ -62,6 +66,7 @@ void handleReceivedIRData()
 bool send_signal()
 {
   irsnd_data.command++;
+  if(irsnd_data.command>0xff) irsnd_data.command = 0x00;
   if(irsnd_send_data(&irsnd_data, false))
   {
     irsnd_data_print(&Serial, &irsnd_data);
@@ -84,24 +89,47 @@ void buttonA1_click()
   }
 }
 
-/**
- * @brief set button events and infrared including interrupts
- * 
- */
-void setup() {
+void buttonA1_longPress()
+{
+  holdingA1 = true;
+}
+
+void buttonA1_doubleclick()
+{
+  stop = true;
+  holdingA1 = false;
+}
+
+void buttonA1_hold_start()
+{
+  //holdingA1 = true;
+}
+void buttonA1_hold_stop()
+{
+  //holdingA1 = false;
+}
+    /**
+     * @brief set button events and infrared including interrupts
+     *
+     */
+    void setup()
+{
   Serial.begin(115200);
   while (!Serial)
   {
     ; // wait for serial port to connect. Needed for Leonardo only
   }
  
-  Serial.println(F("START " __FILE__ " from " __DATE__ "\r\nUsing library version " VERSION_IRMP));
+  Serial.println(F("START " __FILE__ " from " __DATE__ " using IRMP library version " VERSION_IRMP));
 
   /***
    * attach same event handler to one and long click
    ***/
   buttonA1.attachClick(buttonA1_click);
-  buttonA1.attachDuringLongPress(buttonA1_click);
+  buttonA1.attachDuringLongPress(buttonA1_longPress);
+  buttonA1.attachDoubleClick(buttonA1_doubleclick);
+  buttonA1.attachLongPressStart(buttonA1_hold_start);
+  buttonA1.attachLongPressStop(buttonA1_hold_stop);
 
   /***
    * setup ir sending
@@ -110,7 +138,7 @@ void setup() {
   irmp_irsnd_LEDFeedback(true); // Enable send signal feedback at LED_BUILTIN
   irsnd_data.protocol = IRMP_NEC_PROTOCOL;
   irsnd_data.address = 0x0707;
-  irsnd_data.command = 0xFB; // The required inverse of the 8 bit command is added by the send routine.
+  irsnd_data.command = 0x01; // The required inverse of the 8 bit command is added by the send routine.
   irsnd_data.flags = 1;      // repeat frame 1 times
 
   /***
@@ -134,6 +162,20 @@ void loop()
 {
   buttonA1.tick();
 
+  if (stop)
+  {
+    cli();
+    delay(1000);
+    sJustReceived = false;
+    stop = false;
+    sei();
+  }
+
+  if(holdingA1)
+  {
+    send_signal();
+  }
+
   if(sJustReceived)
   {
     digitalWrite(A0, LOW);
@@ -141,6 +183,7 @@ void loop()
     delay(250);
     digitalWrite(A0, HIGH);
     sJustReceived = false;
+    if (irmp_data.command != irsnd_data.command ) send_signal();
   }
 }
 
